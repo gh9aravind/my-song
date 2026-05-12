@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Obsidian Player</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* ============================================================
+       🎵 OBSIDIAN PLAYER — Configuration
+       Swap these two lines to use your own audio and art:
+       ============================================================ */
+    :root {
+      --audio-src:   "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3";
+      --cover-src:   "https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=600&q=80";
+
+      /* Accent – change to any color you like */
+      --accent:      #a78bfa;         /* violet-400  */
+      --accent-glow: rgba(167,139,250,.45);
+      --accent-dark: #7c3aed;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100dvh;
+      background: #0a090f;
+      font-family: 'DM Sans', sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* ── Ambient background blobs ─────────────────────────── */
+    .blob {
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(80px);
+      opacity: .35;
+      animation: drift 18s ease-in-out infinite alternate;
+      pointer-events: none;
+    }
+    .blob-1 { width: 520px; height: 520px; background: #3b0764; top: -180px; left: -180px; animation-delay: 0s; }
+    .blob-2 { width: 400px; height: 400px; background: #1e1b4b; bottom: -120px; right: -100px; animation-delay: -6s; }
+    .blob-3 { width: 280px; height: 280px; background: #4c1d95; top: 50%; left: 55%; animation-delay: -12s; }
+    @keyframes drift {
+      from { transform: translate(0, 0) scale(1); }
+      to   { transform: translate(30px, 20px) scale(1.06); }
+    }
+
+    /* Subtle grain overlay */
+    body::after {
+      content: '';
+      position: fixed; inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+      opacity: .04;
+      pointer-events: none;
+      z-index: 999;
+    }
+
+    /* ── Card ─────────────────────────────────────────────── */
+    .player-card {
+      position: relative;
+      z-index: 10;
+      width: min(420px, 92vw);
+      background: rgba(18, 14, 28, 0.72);
+      backdrop-filter: blur(28px) saturate(1.4);
+      -webkit-backdrop-filter: blur(28px) saturate(1.4);
+      border: 1px solid rgba(167,139,250,.12);
+      border-radius: 28px;
+      padding: 32px 28px 28px;
+      box-shadow:
+        0 0 0 1px rgba(255,255,255,.04) inset,
+        0 30px 80px rgba(0,0,0,.7),
+        0 0 60px var(--accent-glow);
+      animation: cardIn .7s cubic-bezier(.16,1,.3,1) both;
+    }
+    @keyframes cardIn {
+      from { opacity:0; transform: translateY(32px) scale(.96); }
+      to   { opacity:1; transform: translateY(0)   scale(1);    }
+    }
+
+    /* ── Album art ────────────────────────────────────────── */
+    .art-wrapper {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 1;
+      border-radius: 18px;
+      overflow: hidden;
+      margin-bottom: 26px;
+      box-shadow:
+        0 20px 60px rgba(0,0,0,.8),
+        0 0 0 1px rgba(255,255,255,.06) inset;
+      cursor: pointer;
+      transition: transform .3s cubic-bezier(.34,1.56,.64,1);
+    }
+    .art-wrapper:hover { transform: scale(1.015); }
+    .art-wrapper img {
+      width: 100%; height: 100%;
+      object-fit: cover;
+      display: block;
+      transition: transform .6s ease, filter .3s ease;
+    }
+    .art-wrapper:hover img { transform: scale(1.04); filter: brightness(1.08); }
+
+    /* Vinyl spin overlay (shown when playing) */
+    .vinyl-ring {
+      position: absolute;
+      inset: 0;
+      border-radius: 18px;
+      background: radial-gradient(circle at center,
+        rgba(0,0,0,.6) 26%,
+        transparent 27%,
+        transparent 100%);
+      opacity: 0;
+      transition: opacity .4s;
+      display: flex; align-items: center; justify-content: center;
+    }
+    body.playing .vinyl-ring { opacity: 1; }
+    .vinyl-dot {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: #1a1a2e;
+      border: 2px solid rgba(255,255,255,.25);
+      animation: spin 4s linear infinite;
+      animation-play-state: paused;
+    }
+    body.playing .vinyl-dot { animation-play-state: running; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Playing equaliser bars */
+    .eq-bars {
+      position: absolute;
+      bottom: 12px; right: 14px;
+      display: flex; gap: 3px; align-items: flex-end;
+      opacity: 0; transition: opacity .3s;
+    }
+    body.playing .eq-bars { opacity: 1; }
+    .eq-bar {
+      width: 4px; border-radius: 2px;
+      background: var(--accent);
+      animation: eq 0.8s ease-in-out infinite alternate;
+    }
+    .eq-bar:nth-child(1) { height: 8px;  animation-delay: 0s;    animation-duration: .6s; }
+    .eq-bar:nth-child(2) { height: 14px; animation-delay: .15s;  animation-duration: .9s; }
+    .eq-bar:nth-child(3) { height: 10px; animation-delay: .3s;   animation-duration: .7s; }
+    .eq-bar:nth-child(4) { height: 16px; animation-delay: .05s;  animation-duration: .85s; }
+    @keyframes eq {
+      from { transform: scaleY(.3); }
+      to   { transform: scaleY(1); }
+    }
+
+    /* ── Song info ────────────────────────────────────────── */
+    .song-info { margin-bottom: 20px; }
+    .song-title {
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: clamp(1.25rem, 5vw, 1.6rem);
+      color: #f0eeff;
+      letter-spacing: -.02em;
+      line-height: 1.15;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .song-artist {
+      font-size: .88rem;
+      color: #9d8fc2;
+      font-weight: 400;
+      margin-top: 4px;
+      letter-spacing: .01em;
+    }
+
+    /* Like + Share row */
+    .meta-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    .icon-btn {
+      background: none; border: none; cursor: pointer;
+      padding: 8px; border-radius: 50%;
+      color: #6b5f8a;
+      transition: color .2s, transform .2s, background .2s;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .icon-btn:hover { background: rgba(167,139,250,.1); color: var(--accent); transform: scale(1.1); }
+    .icon-btn:active { transform: scale(.93); }
+
+    /* Heart pop */
+    #likeBtn.liked { color: #f43f5e; }
+    #likeBtn.liked svg { animation: heartPop .35s cubic-bezier(.34,1.56,.64,1); }
+    @keyframes heartPop {
+      0%   { transform: scale(1); }
+      50%  { transform: scale(1.4); }
+      100% { transform: scale(1); }
+    }
+
+    /* Share button */
+    #shareBtn { gap: 6px; border-radius: 20px; padding: 7px 14px; font-size: .8rem; font-family: 'DM Sans', sans-serif; font-weight: 500; color: #9d8fc2; border: 1px solid rgba(167,139,250,.18); }
+    #shareBtn:hover { background: rgba(167,139,250,.12); color: var(--accent); border-color: var(--accent); }
+
+    /* Copy toast */
+    .toast {
+      position: fixed;
+      bottom: 32px; left: 50%; transform: translateX(-50%) translateY(12px);
+      background: rgba(30,24,50,.95);
+      border: 1px solid rgba(167,139,250,.3);
+      color: #e2d9f3;
+      font-size: .82rem;
+      padding: 10px 20px;
+      border-radius: 24px;
+      backdrop-filter: blur(12px);
+      opacity: 0; pointer-events: none;
+      transition: opacity .25s, transform .25s;
+      z-index: 1000;
+      white-space: nowrap;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* ── Progress bar ─────────────────────────────────────── */
+    .progress-area { margin-bottom: 20px; }
+    .time-row {
+      display: flex; justify-content: space-between;
+      font-size: .74rem; color: #6b5f8a;
+      font-variant-numeric: tabular-nums;
+      margin-bottom: 8px;
+    }
+    #currentTime { color: var(--accent); }
+
+    .progress-track {
+      position: relative;
+      height: 5px;
+      background: rgba(255,255,255,.08);
+      border-radius: 99px;
+      cursor: pointer;
+      transition: height .2s;
+    }
+    .progress-track:hover { height: 7px; }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent-dark), var(--accent));
+      border-radius: 99px;
+      position: relative;
+      pointer-events: none;
+      transition: width .1s linear;
+      min-width: 0;
+    }
+    .progress-fill::after {
+      content: '';
+      position: absolute;
+      right: -1px; top: 50%;
+      transform: translateY(-50%) scale(0);
+      width: 13px; height: 13px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 0 10px var(--accent-glow);
+      transition: transform .2s;
+    }
+    .progress-track:hover .progress-fill::after { transform: translateY(-50%) scale(1); }
+
+    /* ── Controls ─────────────────────────────────────────── */
+    .controls {
+      display: flex; align-items: center; justify-content: center;
+      gap: 8px; margin-bottom: 24px;
+    }
+
+    .ctrl-btn {
+      background: none; border: none; cursor: pointer;
+      border-radius: 50%; padding: 10px;
+      color: #7c6fa0;
+      transition: color .2s, background .2s, transform .15s;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .ctrl-btn:hover { color: #d4c9f0; background: rgba(255,255,255,.06); transform: scale(1.08); }
+    .ctrl-btn:active { transform: scale(.9); }
+
+    /* Shuffle/Repeat toggle active */
+    .ctrl-btn.active { color: var(--accent); }
+    .ctrl-btn.active svg { filter: drop-shadow(0 0 6px var(--accent-glow)); }
+
+    /* Play/Pause */
+    .play-btn {
+      width: 62px; height: 62px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent-dark), var(--accent));
+      border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      color: #fff;
+      box-shadow: 0 0 0 0 var(--accent-glow), 0 8px 24px rgba(124,58,237,.5);
+      transition: transform .15s cubic-bezier(.34,1.56,.64,1), box-shadow .3s;
+      margin: 0 6px;
+    }
+    .play-btn:hover {
+      transform: scale(1.08);
+      box-shadow: 0 0 0 10px rgba(167,139,250,.12), 0 10px 28px rgba(124,58,237,.6);
+    }
+    .play-btn:active { transform: scale(.95); }
+    body.playing .play-btn { box-shadow: 0 0 0 8px rgba(167,139,250,.15), 0 8px 24px rgba(124,58,237,.5); }
+
+    /* ── Volume ───────────────────────────────────────────── */
+    .volume-row {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .vol-icon { color: #6b5f8a; flex-shrink: 0; }
+
+    input[type=range] {
+      -webkit-appearance: none;
+      appearance: none;
+      flex: 1; height: 4px;
+      background: rgba(255,255,255,.08);
+      border-radius: 99px;
+      outline: none; cursor: pointer;
+      transition: height .2s;
+    }
+    input[type=range]:hover { height: 6px; }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent-glow);
+      cursor: pointer;
+      transition: transform .15s;
+    }
+    input[type=range]:hover::-webkit-slider-thumb { transform: scale(1.2); }
+    input[type=range]::-moz-range-thumb {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: none;
+      box-shadow: 0 0 8px var(--accent-glow);
+      cursor: pointer;
+    }
+
+    /* Dynamic track fill for volume */
+    #volumeSlider {
+      background: linear-gradient(
+        to right,
+        var(--accent) 0%,
+        var(--accent) var(--vol, 80%),
+        rgba(255,255,255,.08) var(--vol, 80%),
+        rgba(255,255,255,.08) 100%
+      );
+    }
+
+    /* ── Divider ──────────────────────────────────────────── */
+    .divider {
+      height: 1px;
+      background: rgba(255,255,255,.06);
+      margin: 22px 0;
+    }
+
+    /* Responsive tweaks */
+    @media (max-width: 360px) {
+      .player-card { padding: 22px 18px 20px; }
+      .play-btn { width: 54px; height: 54px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Ambient blobs -->
+<div class="blob blob-1"></div>
+<div class="blob blob-2"></div>
+<div class="blob blob-3"></div>
+
+<!-- ─────────────────────────────────────────────────────────
+     PLAYER CARD
+     ───────────────────────────────────────────────────────── -->
+<div class="player-card">
+
+  <!-- Album Art -->
+  <div class="art-wrapper" id="artWrapper">
+    <img id="coverImg"
+         src="https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=600&q=80"
+         alt="Album Cover" />
+    <div class="vinyl-ring">
+      <div class="vinyl-dot"></div>
+    </div>
+    <div class="eq-bars">
+      <div class="eq-bar"></div>
+      <div class="eq-bar"></div>
+      <div class="eq-bar"></div>
+      <div class="eq-bar"></div>
+    </div>
+  </div>
+
+  <!-- Song Info -->
+  <div class="song-info">
+    <div class="song-title" id="songTitle">Celestial Drift</div>
+    <div class="song-artist" id="songArtist">Aurora Waves &nbsp;·&nbsp; Neon Horizons</div>
+  </div>
+
+  <!-- Like / Share row -->
+  <div class="meta-row">
+    <button class="icon-btn" id="likeBtn" aria-label="Like">
+      <svg id="heartIcon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+      </svg>
+    </button>
+
+    <!-- extra icon buttons -->
+    <div style="display:flex;gap:4px;">
+      <button class="ctrl-btn" id="shuffleBtn" aria-label="Shuffle" title="Shuffle">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/>
+          <polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/>
+        </svg>
+      </button>
+      <button class="ctrl-btn" id="repeatBtn" aria-label="Repeat" title="Repeat">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+          <polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+        </svg>
+      </button>
+    </div>
+
+    <button class="icon-btn" id="shareBtn" aria-label="Share">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+        <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+      </svg>
+      Share
+    </button>
+  </div>
+
+  <!-- Progress -->
+  <div class="progress-area">
+    <div class="time-row">
+      <span id="currentTime">0:00</span>
+      <span id="totalTime">0:00</span>
+    </div>
+    <div class="progress-track" id="progressTrack">
+      <div class="progress-fill" id="progressFill" style="width:0%"></div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <button class="ctrl-btn" id="prevBtn" aria-label="Previous">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/>
+      </svg>
+    </button>
+
+    <button class="play-btn" id="playBtn" aria-label="Play/Pause">
+      <!-- Play icon -->
+      <svg id="playIcon" width="26" height="26" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M8 5v14l11-7z"/>
+      </svg>
+      <!-- Pause icon (hidden) -->
+      <svg id="pauseIcon" width="26" height="26" viewBox="0 0 24 24" fill="currentColor" style="display:none">
+        <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+      </svg>
+    </button>
+
+    <button class="ctrl-btn" id="nextBtn" aria-label="Next">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+      </svg>
+    </button>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Volume -->
+  <div class="volume-row">
+    <button class="icon-btn vol-icon" id="muteBtn" aria-label="Mute" style="padding:6px;">
+      <svg id="volIcon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+      </svg>
+    </button>
+    <input type="range" id="volumeSlider" min="0" max="100" value="80" style="--vol:80%" />
+  </div>
+
+</div><!-- /.player-card -->
+
+<!-- Toast notification -->
+<div class="toast" id="toast">🔗 Link copied to clipboard!</div>
+
+<!-- Hidden audio element -->
+<audio id="audioEl" preload="metadata"
+  src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3">
+</audio>
+
+<!-- ═══════════════════════════════════════════════════════════
+     JAVASCRIPT
+     ═══════════════════════════════════════════════════════════ -->
+<script>
+/* ============================================================
+   🎵  EASY SWAP — edit just these two lines
+   ============================================================ */
+const AUDIO_SRC  = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3";
+const COVER_SRC  = "https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=600&q=80";
+const SONG_TITLE  = "Celestial Drift";
+const SONG_ARTIST = "Aurora Waves · Neon Horizons";
+/* ============================================================ */
+
+/* — Apply config — */
+const audioEl   = document.getElementById('audioEl');
+const coverImg  = document.getElementById('coverImg');
+audioEl.src     = AUDIO_SRC;
+coverImg.src    = COVER_SRC;
+document.getElementById('songTitle').textContent  = SONG_TITLE;
+document.getElementById('songArtist').textContent = SONG_ARTIST;
+
+/* — Elements — */
+const playBtn      = document.getElementById('playBtn');
+const playIcon     = document.getElementById('playIcon');
+const pauseIcon    = document.getElementById('pauseIcon');
+const progressFill = document.getElementById('progressFill');
+const progressTrack= document.getElementById('progressTrack');
+const currentTimeEl= document.getElementById('currentTime');
+const totalTimeEl  = document.getElementById('totalTime');
+const volumeSlider = document.getElementById('volumeSlider');
+const muteBtn      = document.getElementById('muteBtn');
+const likeBtn      = document.getElementById('likeBtn');
+const shareBtn     = document.getElementById('shareBtn');
+const shuffleBtn   = document.getElementById('shuffleBtn');
+const repeatBtn    = document.getElementById('repeatBtn');
+const prevBtn      = document.getElementById('prevBtn');
+const nextBtn      = document.getElementById('nextBtn');
+const toast        = document.getElementById('toast');
+const artWrapper   = document.getElementById('artWrapper');
+
+let isPlaying = false;
+let isMuted   = false;
+let liked     = false;
+let shuffle   = false;
+let repeat    = false;
+let prevVol   = 80;
+let scrubbing = false;
+
+/* ── Helpers ─────────────────────────────────────────────── */
+function fmt(s) {
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${m}:${sec.toString().padStart(2, '0')}`;
+}
+
+function showToast(msg) {
+  toast.textContent = msg;
+  toast.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => toast.classList.remove('show'), 2600);
+}
+
+function setPlaying(v) {
+  isPlaying = v;
+  document.body.classList.toggle('playing', v);
+  playIcon.style.display  = v ? 'none'  : '';
+  pauseIcon.style.display = v ? ''      : 'none';
+}
+
+/* ── Play / Pause ────────────────────────────────────────── */
+playBtn.addEventListener('click', () => {
+  if (audioEl.paused) { audioEl.play().catch(() => {}); setPlaying(true); }
+  else                 { audioEl.pause(); setPlaying(false); }
+});
+
+/* Art click = play/pause too */
+artWrapper.addEventListener('click', () => playBtn.click());
+
+audioEl.addEventListener('ended', () => {
+  if (repeat) { audioEl.currentTime = 0; audioEl.play(); }
+  else         { setPlaying(false); audioEl.currentTime = 0; }
+});
+
+/* ── Progress ────────────────────────────────────────────── */
+audioEl.addEventListener('timeupdate', () => {
+  if (scrubbing || !audioEl.duration) return;
+  const pct = (audioEl.currentTime / audioEl.duration) * 100;
+  progressFill.style.width = pct + '%';
+  currentTimeEl.textContent = fmt(audioEl.currentTime);
+});
+
+audioEl.addEventListener('loadedmetadata', () => {
+  totalTimeEl.textContent = fmt(audioEl.duration);
+});
+
+/* Scrubbing */
+function scrubTo(e) {
+  const rect = progressTrack.getBoundingClientRect();
+  const x    = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+  const pct  = x / rect.width;
+  progressFill.style.width = (pct * 100) + '%';
+  audioEl.currentTime = pct * (audioEl.duration || 0);
+  currentTimeEl.textContent = fmt(audioEl.currentTime);
+}
+
+progressTrack.addEventListener('mousedown', e => { scrubbing = true; scrubTo(e); });
+progressTrack.addEventListener('touchstart', e => {
+  scrubbing = true;
+  scrubTo(e.touches[0]);
+}, { passive: true });
+window.addEventListener('mousemove', e => { if (scrubbing) scrubTo(e); });
+window.addEventListener('touchmove', e => { if (scrubbing) scrubTo(e.touches[0]); }, { passive: true });
+window.addEventListener('mouseup',   () => { scrubbing = false; });
+window.addEventListener('touchend',  () => { scrubbing = false; });
+
+/* ── Volume ──────────────────────────────────────────────── */
+volumeSlider.addEventListener('input', () => {
+  const v = volumeSlider.value;
+  audioEl.volume = v / 100;
+  volumeSlider.style.setProperty('--vol', v + '%');
+  isMuted = (v == 0);
+  updateVolIcon(v);
+  prevVol = v > 0 ? v : prevVol;
+});
+
+muteBtn.addEventListener('click', () => {
+  if (isMuted) {
+    audioEl.volume = prevVol / 100;
+    volumeSlider.value = prevVol;
+    volumeSlider.style.setProperty('--vol', prevVol + '%');
+    isMuted = false;
+    updateVolIcon(prevVol);
+  } else {
+    prevVol = volumeSlider.value;
+    audioEl.volume = 0;
+    volumeSlider.value = 0;
+    volumeSlider.style.setProperty('--vol', '0%');
+    isMuted = true;
+    updateVolIcon(0);
+  }
+});
+
+function updateVolIcon(v) {
+  const icon = document.getElementById('volIcon');
+  if (v == 0) {
+    icon.innerHTML = `<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+      <line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>`;
+  } else if (v < 50) {
+    icon.innerHTML = `<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+      <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>`;
+  } else {
+    icon.innerHTML = `<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+      <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+      <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>`;
+  }
+}
+
+/* ── Skip / Seek 10s ─────────────────────────────────────── */
+prevBtn.addEventListener('click', () => {
+  audioEl.currentTime = Math.max(0, audioEl.currentTime - 10);
+});
+nextBtn.addEventListener('click', () => {
+  audioEl.currentTime = Math.min(audioEl.duration || 0, audioEl.currentTime + 10);
+});
+
+/* ── Like ────────────────────────────────────────────────── */
+likeBtn.addEventListener('click', () => {
+  liked = !liked;
+  likeBtn.classList.toggle('liked', liked);
+  const svg = likeBtn.querySelector('svg');
+  svg.setAttribute('fill', liked ? 'currentColor' : 'none');
+  showToast(liked ? '❤️  Added to your Liked Songs' : '♡ Removed from Liked Songs');
+});
+
+/* ── Share ───────────────────────────────────────────────── */
+shareBtn.addEventListener('click', async () => {
+  const url = window.location.href;
+  if (navigator.share) {
+    try { await navigator.share({ title: SONG_TITLE, text: `Listen: ${SONG_TITLE} by ${SONG_ARTIST}`, url }); return; }
+    catch {}
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    showToast('🔗 Link copied to clipboard!');
+  } catch {
+    showToast('📋 Copy the URL from your address bar');
+  }
+});
+
+/* ── Shuffle / Repeat toggles ────────────────────────────── */
+shuffleBtn.addEventListener('click', () => {
+  shuffle = !shuffle;
+  shuffleBtn.classList.toggle('active', shuffle);
+  showToast(shuffle ? '🔀 Shuffle on' : '🔀 Shuffle off');
+});
+repeatBtn.addEventListener('click', () => {
+  repeat = !repeat;
+  repeatBtn.classList.toggle('active', repeat);
+  showToast(repeat ? '🔁 Repeat on' : '🔁 Repeat off');
+});
+
+/* ── Keyboard shortcuts ──────────────────────────────────── */
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space') { e.preventDefault(); playBtn.click(); }
+  if (e.code === 'ArrowLeft')  prevBtn.click();
+  if (e.code === 'ArrowRight') nextBtn.click();
+  if (e.code === 'KeyM')       muteBtn.click();
+  if (e.code === 'KeyL')       likeBtn.click();
+});
+
+/* ── Set initial volume ──────────────────────────────────── */
+audioEl.volume = 0.8;
+</script>
+</body>
+</html>
